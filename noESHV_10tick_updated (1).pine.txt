@@ -67,9 +67,7 @@ enable_table = input.bool(true, "Enable Table Display", group="Display")
 // SESSION DETECTION
 // =============================================================================
 
-in_session_evening = not na(time(timeframe.period, "1800-2359:123456", "America/New_York"))
-in_session_day = not na(time(timeframe.period, "0000-1700:123456", "America/New_York"))
-in_session = in_session_evening or in_session_day
+in_session = not na(time(timeframe.period, "1800-1700:123456", "America/New_York"))
 is_rth = not na(time(timeframe.period, "0930-1600:23456", "America/New_York"))
 
 var bool new_rth_session = false

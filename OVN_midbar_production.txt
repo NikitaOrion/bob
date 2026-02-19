@@ -47,10 +47,8 @@ enable_webhook_export = input.bool(true, "Enable Webhook Data Export", group="We
 // SESSION DETECTION - OVN ONLY (6pm ET to 9:30am ET)
 // =============================================================================
 
-// OVN session: 6pm-midnight ET and midnight-9:30am ET
-in_session_evening = not na(time(timeframe.period, "1800-2359:123456", "America/New_York"))
-in_session_morning = not na(time(timeframe.period, "0000-0930:123456", "America/New_York"))
-in_session = in_session_evening or in_session_morning
+// OVN session: 6pm ET to 9:30am ET (single overnight session, no midnight gap)
+in_session = not na(time(timeframe.period, "1800-0930:123456", "America/New_York"))
 
 // RTH detection (to know when to stop)
 is_rth = not na(time(timeframe.period, "0930-1600:23456", "America/New_York"))
