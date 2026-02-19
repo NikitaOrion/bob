@@ -46,16 +46,16 @@ enable_alerts = input.bool(true, "Enable TraderPost Bracket Alerts", group="Trad
 enable_webhook_export = input.bool(true, "Enable Webhook Data Export", group="Webhook Export")
 
 // =============================================================================
-// SESSION DETECTION - OVN ONLY (6pm ET to 9:30am ET)
+// SESSION DETECTION - EXTENDED (6pm ET to 4pm ET / 1pm PST)
 // =============================================================================
 
-// OVN session: 6pm-midnight ET and midnight-9:30am ET
+// Extended session: 6pm-midnight ET and midnight-4pm ET (1pm PST)
 in_session_evening = not na(time(timeframe.period, "1800-2359:123456", "America/New_York"))
-in_session_morning = not na(time(timeframe.period, "0000-0930:123456", "America/New_York"))
+in_session_morning = not na(time(timeframe.period, "0000-1600:123456", "America/New_York"))
 in_session = in_session_evening or in_session_morning
 
-// RTH detection (to know when to stop)
-is_rth = not na(time(timeframe.period, "0930-1600:23456", "America/New_York"))
+// Session end detection (4pm-6pm ET window, to know when to force close)
+is_session_end = not na(time(timeframe.period, "1600-1800:23456", "America/New_York"))
 
 // Globex open detection (6pm ET)
 f_is_globex_open() =>
@@ -617,10 +617,10 @@ if strategy.position_size < 0 and not na(entry_px)
     if scale_filled
         strategy.exit("XS+", "S+", stop=entry_px + stop_loss_points, limit=entry_px - target_pts, comment_profit="TP", comment_loss="SL")
 
-// Close at RTH open (end of OVN session)
+// Close at session end (4pm ET / 1pm PST)
 var bool rth_exit_triggered = false
 rth_exit_triggered := false
-if is_rth and strategy.position_size != 0
+if is_session_end and strategy.position_size != 0
     strategy.close_all("RTH")
     rth_exit_triggered := true
 
