@@ -3,10 +3,10 @@
 // © ES OVN Strategy - SPX/NDX Spreadex Correlates
 
 //@version=5
-strategy("MIDBAR_OVN_ES OVN Strategy", 
-     overlay=true, 
+strategy("MIDBAR_OVN_ES OVN Strategy (Extended)",
+     overlay=true,
      initial_capital=10000,
-     default_qty_type=strategy.fixed, 
+     default_qty_type=strategy.fixed,
      default_qty_value=1,
      pyramiding=3,
      calc_on_order_fills=true)
@@ -19,11 +19,13 @@ iv_es = input.float(13.50, "ES IV%", minval=0.1, maxval=100.0, step=0.1, group="
 hv_es = input.float(12.00, "ES HV%", minval=0.1, maxval=100.0, step=0.1, group="Historical Volatility")
 iv_spx_sx = input.float(13.33, "SPX Spreadex IV%", minval=0.1, maxval=100.0, step=0.1, group="Implied Volatility")
 iv_ndx_sx = input.float(18.50, "NDX Spreadex IV%", minval=0.1, maxval=100.0, step=0.1, group="Implied Volatility")
+iv_nq = input.float(20.29, "NQ IV%", minval=0.1, maxval=100.0, step=0.1, group="Implied Volatility")
 
 enable_es_iv = input.bool(true, "Enable ES IV Triggers", group="Ticker Toggles")
 enable_es_hv = input.bool(true, "Enable ES HV Triggers", group="Ticker Toggles")
 enable_spx_sx = input.bool(true, "Enable SPX Spreadex Triggers", group="Ticker Toggles")
 enable_ndx_sx = input.bool(true, "Enable NDX Spreadex Triggers", group="Ticker Toggles")
+enable_nq = input.bool(true, "Enable NQ Triggers", group="Ticker Toggles")
 enable_broken_level_filter = input.bool(true, "Enable Broken Level Disqualification", group="Ticker Toggles")
 
 reversal_amount = input.float(1.0, "ES Reversal Confirmation (points)", minval=0.25, step=0.25, group="Strategy")
@@ -44,14 +46,14 @@ enable_alerts = input.bool(true, "Enable TraderPost Bracket Alerts", group="Trad
 enable_webhook_export = input.bool(true, "Enable Webhook Data Export", group="Webhook Export")
 
 // =============================================================================
-// SESSION DETECTION - OVN ONLY (6pm ET to 9:30am ET)
+// SESSION DETECTION - EXTENDED (6pm ET to 4pm ET / 1pm PST)
 // =============================================================================
 
-// OVN session: 6pm ET to 9:30am ET (single overnight session, no midnight gap)
-in_session = not na(time(timeframe.period, "1800-0930:123456", "America/New_York"))
+// Extended session: 6pm ET to 4pm ET (OVN + RTH, 22 hours)
+in_session = not na(time(timeframe.period, "1800-1600:123456", "America/New_York"))
 
-// RTH detection (to know when to stop)
-is_rth = not na(time(timeframe.period, "0930-1600:23456", "America/New_York"))
+// Session end detection (4pm ET / 1pm PST - to close positions)
+is_session_end = not in_session and in_session[1]
 
 // Globex open detection (6pm ET)
 f_is_globex_open() =>
@@ -90,6 +92,10 @@ ndx_sx_high_prev = request.security("SPREADEX:NDX", timeframe.period, high[1], b
 ndx_sx_low_prev = request.security("SPREADEX:NDX", timeframe.period, low[1], barmerge.gaps_off, barmerge.lookahead_off)
 ndx_sx_open_price = request.security("SPREADEX:NDX", timeframe.period, open, barmerge.gaps_off, barmerge.lookahead_off)
 
+// NQ Futures - Daily for prev close, Intraday for touch detection
+[nq_today_open, nq_yest_close] = request.security("CME_MINI:NQ1!", "D", [open, close[1]], barmerge.gaps_off, barmerge.lookahead_on)
+[nq_high, nq_low, nq_close_val, nq_open_bar, nq_high_prev, nq_low_prev] = request.security("CME_MINI:NQ1!", timeframe.period, [high, low, close, open, high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+
 // =============================================================================
 // CALCULATE SD LEVELS
 // =============================================================================
@@ -97,6 +103,7 @@ ndx_sx_open_price = request.security("SPREADEX:NDX", timeframe.period, open, bar
 var float es_open = na, var float es_prev_close = na
 var float spx_sx_open = na, var float spx_sx_prev_close = na
 var float ndx_sx_open = na, var float ndx_sx_prev_close = na
+var float nq_open = na, var float nq_prev_close = na
 
 if is_globex_open
     es_open := es_globex_open
@@ -105,11 +112,14 @@ if is_globex_open
     spx_sx_prev_close := spx_sx_close_val[1]
     ndx_sx_open := ndx_sx_open_price
     ndx_sx_prev_close := ndx_sx_close_val[1]
+    nq_open := nq_open_bar
+    nq_prev_close := nq_yest_close
 
 es_iv_range = not na(es_prev_close) ? math.sqrt(1.0 / 365.0) * (iv_es / 100.0) * es_prev_close : na
 es_hv_range = not na(es_prev_close) ? math.sqrt(1.0 / 365.0) * (hv_es / 100.0) * es_prev_close : na
 spx_sx_range = not na(spx_sx_prev_close) ? math.sqrt(1.0 / 365.0) * (iv_spx_sx / 100.0) * spx_sx_prev_close : na
 ndx_sx_range = not na(ndx_sx_prev_close) ? math.sqrt(1.0 / 365.0) * (iv_ndx_sx / 100.0) * ndx_sx_prev_close : na
+nq_range = not na(nq_prev_close) ? math.sqrt(1.0 / 365.0) * (iv_nq / 100.0) * nq_prev_close : na
 
 var float es_iv_p1 = na, var float es_iv_p2 = na, var float es_iv_p3 = na
 var float es_iv_m1 = na, var float es_iv_m2 = na, var float es_iv_m3 = na
@@ -119,6 +129,8 @@ var float spx_sx_p1 = na, var float spx_sx_p2 = na, var float spx_sx_p3 = na
 var float spx_sx_m1 = na, var float spx_sx_m2 = na, var float spx_sx_m3 = na
 var float ndx_sx_p1 = na, var float ndx_sx_p2 = na, var float ndx_sx_p3 = na
 var float ndx_sx_m1 = na, var float ndx_sx_m2 = na, var float ndx_sx_m3 = na
+var float nq_p1 = na, var float nq_p2 = na, var float nq_p3 = na
+var float nq_m1 = na, var float nq_m2 = na, var float nq_m3 = na
 
 if is_globex_open and not na(es_open)
     if not na(es_iv_range)
@@ -133,6 +145,9 @@ if is_globex_open and not na(es_open)
     if not na(ndx_sx_range) and not na(ndx_sx_open)
         ndx_sx_p1 := ndx_sx_open + ndx_sx_range, ndx_sx_p2 := ndx_sx_open + 2 * ndx_sx_range, ndx_sx_p3 := ndx_sx_open + 3 * ndx_sx_range
         ndx_sx_m1 := ndx_sx_open - ndx_sx_range, ndx_sx_m2 := ndx_sx_open - 2 * ndx_sx_range, ndx_sx_m3 := ndx_sx_open - 3 * ndx_sx_range
+    if not na(nq_range) and not na(nq_open)
+        nq_p1 := nq_open + nq_range, nq_p2 := nq_open + 2 * nq_range, nq_p3 := nq_open + 3 * nq_range
+        nq_m1 := nq_open - nq_range, nq_m2 := nq_open - 2 * nq_range, nq_m3 := nq_open - 3 * nq_range
 
 // =============================================================================
 // BROKEN LEVEL TRACKING
@@ -146,6 +161,8 @@ var bool spx_sx_m1_broken = false, var bool spx_sx_m2_broken = false, var bool s
 var bool spx_sx_p1_broken = false, var bool spx_sx_p2_broken = false, var bool spx_sx_p3_broken = false
 var bool ndx_sx_m1_broken = false, var bool ndx_sx_m2_broken = false, var bool ndx_sx_m3_broken = false
 var bool ndx_sx_p1_broken = false, var bool ndx_sx_p2_broken = false, var bool ndx_sx_p3_broken = false
+var bool nq_m1_broken = false, var bool nq_m2_broken = false, var bool nq_m3_broken = false
+var bool nq_p1_broken = false, var bool nq_p2_broken = false, var bool nq_p3_broken = false
 
 if new_session
     es_iv_m1_broken := false, es_iv_m2_broken := false, es_iv_m3_broken := false
@@ -156,6 +173,8 @@ if new_session
     spx_sx_p1_broken := false, spx_sx_p2_broken := false, spx_sx_p3_broken := false
     ndx_sx_m1_broken := false, ndx_sx_m2_broken := false, ndx_sx_m3_broken := false
     ndx_sx_p1_broken := false, ndx_sx_p2_broken := false, ndx_sx_p3_broken := false
+    nq_m1_broken := false, nq_m2_broken := false, nq_m3_broken := false
+    nq_p1_broken := false, nq_p2_broken := false, nq_p3_broken := false
 
 if enable_broken_level_filter
     // ES IV broken levels
@@ -210,6 +229,19 @@ if enable_broken_level_filter
         ndx_sx_p2_broken := true
     if not na(ndx_sx_p3) and ndx_sx_close_val > ndx_sx_p3
         ndx_sx_p3_broken := true
+    // NQ broken levels
+    if not na(nq_m1) and nq_close_val < nq_m1
+        nq_m1_broken := true
+    if not na(nq_m2) and nq_close_val < nq_m2
+        nq_m2_broken := true
+    if not na(nq_m3) and nq_close_val < nq_m3
+        nq_m3_broken := true
+    if not na(nq_p1) and nq_close_val > nq_p1
+        nq_p1_broken := true
+    if not na(nq_p2) and nq_close_val > nq_p2
+        nq_p2_broken := true
+    if not na(nq_p3) and nq_close_val > nq_p3
+        nq_p3_broken := true
 
 f_is_broken(broken_state) => enable_broken_level_filter ? broken_state : false
 
@@ -269,9 +301,22 @@ ndx_sx_touch_p3_valid = in_session and not f_is_broken(ndx_sx_p3_broken) and not
 ndx_sx_touch_up = ndx_sx_touch_p1_valid or ndx_sx_touch_p2_valid or ndx_sx_touch_p3_valid
 ndx_sx_sd_level_up = ndx_sx_touch_p1_valid ? 1 : ndx_sx_touch_p2_valid ? 2 : ndx_sx_touch_p3_valid ? 3 : 0
 
+// NQ touch detection
+nq_touch_m1_valid = in_session and not f_is_broken(nq_m1_broken) and not na(nq_m1) and nq_low <= nq_m1 and nq_low_prev > nq_m1 and nq_close_val > nq_m1
+nq_touch_m2_valid = in_session and not f_is_broken(nq_m2_broken) and not na(nq_m2) and nq_low <= nq_m2 and nq_low_prev > nq_m2 and nq_close_val > nq_m2
+nq_touch_m3_valid = in_session and not f_is_broken(nq_m3_broken) and not na(nq_m3) and nq_low <= nq_m3 and nq_low_prev > nq_m3 and nq_close_val > nq_m3
+nq_touch_dn = nq_touch_m1_valid or nq_touch_m2_valid or nq_touch_m3_valid
+nq_sd_level_dn = nq_touch_m1_valid ? 1 : nq_touch_m2_valid ? 2 : nq_touch_m3_valid ? 3 : 0
+
+nq_touch_p1_valid = in_session and not f_is_broken(nq_p1_broken) and not na(nq_p1) and nq_high >= nq_p1 and nq_high_prev < nq_p1 and nq_close_val < nq_p1
+nq_touch_p2_valid = in_session and not f_is_broken(nq_p2_broken) and not na(nq_p2) and nq_high >= nq_p2 and nq_high_prev < nq_p2 and nq_close_val < nq_p2
+nq_touch_p3_valid = in_session and not f_is_broken(nq_p3_broken) and not na(nq_p3) and nq_high >= nq_p3 and nq_high_prev < nq_p3 and nq_close_val < nq_p3
+nq_touch_up = nq_touch_p1_valid or nq_touch_p2_valid or nq_touch_p3_valid
+nq_sd_level_up = nq_touch_p1_valid ? 1 : nq_touch_p2_valid ? 2 : nq_touch_p3_valid ? 3 : 0
+
 // Combined touch signals
-any_touch_dn = (enable_es_iv and es_iv_touch_dn) or (enable_es_hv and es_hv_touch_dn) or (enable_spx_sx and spx_sx_touch_dn) or (enable_ndx_sx and ndx_sx_touch_dn)
-any_touch_up = (enable_es_iv and es_iv_touch_up) or (enable_es_hv and es_hv_touch_up) or (enable_spx_sx and spx_sx_touch_up) or (enable_ndx_sx and ndx_sx_touch_up)
+any_touch_dn = (enable_es_iv and es_iv_touch_dn) or (enable_es_hv and es_hv_touch_dn) or (enable_spx_sx and spx_sx_touch_dn) or (enable_ndx_sx and ndx_sx_touch_dn) or (enable_nq and nq_touch_dn)
+any_touch_up = (enable_es_iv and es_iv_touch_up) or (enable_es_hv and es_hv_touch_up) or (enable_spx_sx and spx_sx_touch_up) or (enable_ndx_sx and ndx_sx_touch_up) or (enable_nq and nq_touch_up)
 
 // =============================================================================
 // CONFLUENCE
@@ -283,6 +328,7 @@ var int es_iv_sd_dn_bar = na, var int es_hv_sd_dn_bar = na
 var int es_iv_sd_up_bar = na, var int es_hv_sd_up_bar = na
 var int spx_sx_sd_dn_bar = na, var int spx_sx_sd_up_bar = na
 var int ndx_sx_sd_dn_bar = na, var int ndx_sx_sd_up_bar = na
+var int nq_sd_dn_bar = na, var int nq_sd_up_bar = na
 
 if es_iv_touch_dn
     es_iv_sd_dn_bar := bar_index
@@ -292,6 +338,8 @@ if spx_sx_touch_dn
     spx_sx_sd_dn_bar := bar_index
 if ndx_sx_touch_dn
     ndx_sx_sd_dn_bar := bar_index
+if nq_touch_dn
+    nq_sd_dn_bar := bar_index
 if es_iv_touch_up
     es_iv_sd_up_bar := bar_index
 if es_hv_touch_up
@@ -300,25 +348,30 @@ if spx_sx_touch_up
     spx_sx_sd_up_bar := bar_index
 if ndx_sx_touch_up
     ndx_sx_sd_up_bar := bar_index
+if nq_touch_up
+    nq_sd_up_bar := bar_index
 
 if new_session
     es_iv_sd_dn_bar := na, es_hv_sd_dn_bar := na
     es_iv_sd_up_bar := na, es_hv_sd_up_bar := na
     spx_sx_sd_dn_bar := na, spx_sx_sd_up_bar := na
     ndx_sx_sd_dn_bar := na, ndx_sx_sd_up_bar := na
+    nq_sd_dn_bar := na, nq_sd_up_bar := na
 
 conf_long_es_iv = f_within_window(es_iv_sd_dn_bar, confluence_window) ? 1 : 0
 conf_long_es_hv = f_within_window(es_hv_sd_dn_bar, confluence_window) ? 1 : 0
 conf_long_spx_sx = f_within_window(spx_sx_sd_dn_bar, confluence_window) ? 1 : 0
 conf_long_ndx_sx = f_within_window(ndx_sx_sd_dn_bar, confluence_window) ? 1 : 0
+conf_long_nq = f_within_window(nq_sd_dn_bar, confluence_window) ? 1 : 0
 
 conf_short_es_iv = f_within_window(es_iv_sd_up_bar, confluence_window) ? 1 : 0
 conf_short_es_hv = f_within_window(es_hv_sd_up_bar, confluence_window) ? 1 : 0
 conf_short_spx_sx = f_within_window(spx_sx_sd_up_bar, confluence_window) ? 1 : 0
 conf_short_ndx_sx = f_within_window(ndx_sx_sd_up_bar, confluence_window) ? 1 : 0
+conf_short_nq = f_within_window(nq_sd_up_bar, confluence_window) ? 1 : 0
 
-confluence_score_long = conf_long_es_iv + conf_long_es_hv + conf_long_spx_sx + conf_long_ndx_sx
-confluence_score_short = conf_short_es_iv + conf_short_es_hv + conf_short_spx_sx + conf_short_ndx_sx
+confluence_score_long = conf_long_es_iv + conf_long_es_hv + conf_long_spx_sx + conf_long_ndx_sx + conf_long_nq
+confluence_score_short = conf_short_es_iv + conf_short_es_hv + conf_short_spx_sx + conf_short_ndx_sx + conf_short_nq
 
 // =============================================================================
 // WATCH STATES
@@ -355,8 +408,10 @@ if any_touch_up and not watching_short and is_flat_for_watch and in_session
         temp_conf := temp_conf + "SPXSX" + str.tostring(spx_sx_sd_level_up) + "H,"
     if conf_short_ndx_sx > 0
         temp_conf := temp_conf + "NDXSX" + str.tostring(ndx_sx_sd_level_up) + "H,"
+    if conf_short_nq > 0
+        temp_conf := temp_conf + "NQ" + str.tostring(nq_sd_level_up) + "H,"
     watch_short_conf_list := temp_conf
-    // Priority: ES IV > ES HV > SPX_SX > NDX_SX
+    // Priority: ES IV > ES HV > SPX_SX > NDX_SX > NQ
     if enable_es_iv and es_iv_touch_up
         watch_short_ticker := "ES-IV", watch_short_sd_level := es_iv_sd_level_up
         watch_short_level_price := es_iv_sd_level_up == 1 ? es_iv_p1 : es_iv_sd_level_up == 2 ? es_iv_p2 : es_iv_p3
@@ -369,6 +424,9 @@ if any_touch_up and not watching_short and is_flat_for_watch and in_session
     else if enable_ndx_sx and ndx_sx_touch_up
         watch_short_ticker := "NDX-SX", watch_short_sd_level := ndx_sx_sd_level_up
         watch_short_level_price := ndx_sx_sd_level_up == 1 ? ndx_sx_p1 : ndx_sx_sd_level_up == 2 ? ndx_sx_p2 : ndx_sx_p3
+    else if enable_nq and nq_touch_up
+        watch_short_ticker := "NQ", watch_short_sd_level := nq_sd_level_up
+        watch_short_level_price := nq_sd_level_up == 1 ? nq_p1 : nq_sd_level_up == 2 ? nq_p2 : nq_p3
 
 if any_touch_dn and not watching_long and is_flat_for_watch and in_session
     watching_long := true, watch_long_price := close, watch_long_count := 0, watch_long_confluence := confluence_score_long
@@ -381,8 +439,10 @@ if any_touch_dn and not watching_long and is_flat_for_watch and in_session
         temp_conf_l := temp_conf_l + "SPXSX" + str.tostring(spx_sx_sd_level_dn) + "L,"
     if conf_long_ndx_sx > 0
         temp_conf_l := temp_conf_l + "NDXSX" + str.tostring(ndx_sx_sd_level_dn) + "L,"
+    if conf_long_nq > 0
+        temp_conf_l := temp_conf_l + "NQ" + str.tostring(nq_sd_level_dn) + "L,"
     watch_long_conf_list := temp_conf_l
-    // Priority: ES IV > ES HV > SPX_SX > NDX_SX
+    // Priority: ES IV > ES HV > SPX_SX > NDX_SX > NQ
     if enable_es_iv and es_iv_touch_dn
         watch_long_ticker := "ES-IV", watch_long_sd_level := es_iv_sd_level_dn
         watch_long_level_price := es_iv_sd_level_dn == 1 ? es_iv_m1 : es_iv_sd_level_dn == 2 ? es_iv_m2 : es_iv_m3
@@ -395,6 +455,9 @@ if any_touch_dn and not watching_long and is_flat_for_watch and in_session
     else if enable_ndx_sx and ndx_sx_touch_dn
         watch_long_ticker := "NDX-SX", watch_long_sd_level := ndx_sx_sd_level_dn
         watch_long_level_price := ndx_sx_sd_level_dn == 1 ? ndx_sx_m1 : ndx_sx_sd_level_dn == 2 ? ndx_sx_m2 : ndx_sx_m3
+    else if enable_nq and nq_touch_dn
+        watch_long_ticker := "NQ", watch_long_sd_level := nq_sd_level_dn
+        watch_long_level_price := nq_sd_level_dn == 1 ? nq_m1 : nq_sd_level_dn == 2 ? nq_m2 : nq_m3
 
 if watching_short
     watch_short_count := watch_short_count + 1
@@ -550,12 +613,12 @@ if strategy.position_size < 0 and not na(entry_px)
     if scale_filled
         strategy.exit("XS+", "S+", stop=entry_px + stop_loss_points, limit=entry_px - target_pts, comment_profit="TP", comment_loss="SL")
 
-// Close at RTH open (end of OVN session)
-var bool rth_exit_triggered = false
-rth_exit_triggered := false
-if is_rth and strategy.position_size != 0
-    strategy.close_all("RTH")
-    rth_exit_triggered := true
+// Close at session end (4pm ET / 1pm PST)
+var bool session_exit_triggered = false
+session_exit_triggered := false
+if is_session_end and strategy.position_size != 0
+    strategy.close_all("EOD")
+    session_exit_triggered := true
 
 // =============================================================================
 // EXIT DETECTION + WEBHOOK
@@ -571,12 +634,12 @@ if just_closed
     trade_pnl = strategy.netprofit - strategy.netprofit[1]
     running_pnl := running_pnl + trade_pnl
     
-    exit_type = is_winner ? "TP" : rth_exit_triggered ? "RTH" : "SL"
+    exit_type = is_winner ? "TP" : session_exit_triggered ? "EOD" : "SL"
     
     level_dir = stored_trade_dir == 1 ? "Low" : "High"
     level_name = entry_trigger_ticker + "-SD" + str.tostring(entry_sd_level) + level_dir
     broke_3pt = trade_max_beyond_level >= 3.0
-    trigger_iv = entry_trigger_ticker == "ES-IV" ? iv_es : entry_trigger_ticker == "ES-HV" ? hv_es : entry_trigger_ticker == "SPX-SX" ? iv_spx_sx : iv_ndx_sx
+    trigger_iv = entry_trigger_ticker == "ES-IV" ? iv_es : entry_trigger_ticker == "ES-HV" ? hv_es : entry_trigger_ticker == "SPX-SX" ? iv_spx_sx : entry_trigger_ticker == "NDX-SX" ? iv_ndx_sx : iv_nq
     
     safe_entry_px = na(stored_entry_px) ? 0.0 : stored_entry_px
     safe_level_px = na(entry_level_price) ? 0.0 : entry_level_price
@@ -604,7 +667,7 @@ if just_closed
          ',"conf_cnt":' + str.tostring(entry_confluence) +
          ',"confs":"' + trade_confluences_list + '"' +
          ',"iv":' + str.tostring(safe_trigger_iv, "#.##") +
-         ',"session":"OVN"' +
+         ',"session":"EXT"' +
          ',"bars":' + str.tostring(bar_index - entry_bar) + '}'
     
     if enable_webhook_export
@@ -634,7 +697,7 @@ if scale_in_triggered and trade_dir == -1 and enable_scale_in_alerts and enable_
     alert_msg = '{"ticker":"' + tp_ticker + '","action":"sell","orderType":"market","quantity":' + str.tostring(scale_contracts) + '}'
     alert(alert_msg, alert.freq_once_per_bar)
 
-if rth_exit_triggered and enable_alerts
+if session_exit_triggered and enable_alerts
     alert_msg = '{"ticker":"' + tp_ticker + '","action":"exit","orderType":"market"}'
     alert(alert_msg, alert.freq_once_per_bar_close)
 
@@ -674,10 +737,18 @@ plot(ndx_sx_m1, "-1SD NDXSX", color=color.new(color.teal, 60), linewidth=1, styl
 plot(ndx_sx_m2, "-2SD NDXSX", color=color.new(color.teal, 30), linewidth=1, style=plot.style_linebr)
 plot(ndx_sx_m3, "-3SD NDXSX", color=color.new(color.teal, 0), linewidth=2, style=plot.style_linebr)
 
+// NQ levels - blue (original values, won't display on ES chart due to price range)
+plot(nq_p3, "+3SD NQ", color=color.new(color.blue, 0), linewidth=2, style=plot.style_linebr)
+plot(nq_p2, "+2SD NQ", color=color.new(color.blue, 30), linewidth=1, style=plot.style_linebr)
+plot(nq_p1, "+1SD NQ", color=color.new(color.blue, 60), linewidth=1, style=plot.style_linebr)
+plot(nq_m1, "-1SD NQ", color=color.new(color.blue, 60), linewidth=1, style=plot.style_linebr)
+plot(nq_m2, "-2SD NQ", color=color.new(color.blue, 30), linewidth=1, style=plot.style_linebr)
+plot(nq_m3, "-3SD NQ", color=color.new(color.blue, 0), linewidth=2, style=plot.style_linebr)
+
 plot(es_open, "ES Globex Open", color=color.new(color.yellow, 50), linewidth=1, style=plot.style_linebr)
 
 // Info table
-var table tbl = table.new(position.top_right, 3, 9, bgcolor=color.new(color.black, 70), border_width=1, border_color=color.gray)
+var table tbl = table.new(position.top_right, 3, 10, bgcolor=color.new(color.black, 70), border_width=1, border_color=color.gray)
 table.cell(tbl, 0, 0, "Ticker", bgcolor=color.new(color.purple, 60), text_color=color.white)
 table.cell(tbl, 1, 0, "-2SD", bgcolor=color.new(color.purple, 60), text_color=color.white)
 table.cell(tbl, 2, 0, "+2SD", bgcolor=color.new(color.purple, 60), text_color=color.white)
@@ -685,18 +756,19 @@ table.cell(tbl, 0, 1, "ES IV", text_color=color.white), table.cell(tbl, 1, 1, st
 table.cell(tbl, 0, 2, "ES HV", text_color=color.white), table.cell(tbl, 1, 2, str.tostring(es_hv_m2, "#.##"), text_color=color.aqua), table.cell(tbl, 2, 2, str.tostring(es_hv_p2, "#.##"), text_color=color.fuchsia)
 table.cell(tbl, 0, 3, "SPXSX", text_color=color.orange), table.cell(tbl, 1, 3, str.tostring(spx_sx_m2, "#.##"), text_color=color.orange), table.cell(tbl, 2, 3, str.tostring(spx_sx_p2, "#.##"), text_color=color.orange)
 table.cell(tbl, 0, 4, "NDXSX", text_color=color.teal), table.cell(tbl, 1, 4, str.tostring(ndx_sx_m2, "#.##"), text_color=color.teal), table.cell(tbl, 2, 4, str.tostring(ndx_sx_p2, "#.##"), text_color=color.teal)
-table.cell(tbl, 0, 5, "Watch", text_color=color.white)
+table.cell(tbl, 0, 5, "NQ", text_color=color.blue), table.cell(tbl, 1, 5, str.tostring(nq_m2, "#.##"), text_color=color.blue), table.cell(tbl, 2, 5, str.tostring(nq_p2, "#.##"), text_color=color.blue)
+table.cell(tbl, 0, 6, "Watch", text_color=color.white)
 ws = (watching_long ? "L:" + watch_long_ticker : "") + (watching_short ? "S:" + watch_short_ticker : "")
-table.cell(tbl, 1, 5, ws == "" ? "None" : ws, text_color=color.yellow), table.cell(tbl, 2, 5, "")
-table.cell(tbl, 0, 6, "Pos", text_color=color.white)
+table.cell(tbl, 1, 6, ws == "" ? "None" : ws, text_color=color.yellow), table.cell(tbl, 2, 6, "")
+table.cell(tbl, 0, 7, "Pos", text_color=color.white)
 ps = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
 pc = strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.fuchsia : color.gray
-table.cell(tbl, 1, 6, ps, text_color=pc), table.cell(tbl, 2, 6, str.tostring(math.abs(strategy.position_size)))
-table.cell(tbl, 0, 7, "Conf", text_color=color.white)
+table.cell(tbl, 1, 7, ps, text_color=pc), table.cell(tbl, 2, 7, str.tostring(math.abs(strategy.position_size)))
+table.cell(tbl, 0, 8, "Conf", text_color=color.white)
 cc = watching_long ? watch_long_confluence : watching_short ? watch_short_confluence : 0
-table.cell(tbl, 1, 7, str.tostring(cc), text_color=color.lime), table.cell(tbl, 2, 7, in_session ? "OVN" : "OFF", text_color=in_session ? color.orange : color.gray)
-table.cell(tbl, 0, 8, "BrknFlt", text_color=color.white)
-table.cell(tbl, 1, 8, enable_broken_level_filter ? "ON" : "OFF", text_color=enable_broken_level_filter ? color.lime : color.orange), table.cell(tbl, 2, 8, "")
+table.cell(tbl, 1, 8, str.tostring(cc), text_color=color.lime), table.cell(tbl, 2, 8, in_session ? "EXT" : "OFF", text_color=in_session ? color.orange : color.gray)
+table.cell(tbl, 0, 9, "BrknFlt", text_color=color.white)
+table.cell(tbl, 1, 9, enable_broken_level_filter ? "ON" : "OFF", text_color=enable_broken_level_filter ? color.lime : color.orange), table.cell(tbl, 2, 9, "")
 
 bgcolor(in_session ? color.new(color.purple, 95) : na, title="OVN Session")
 bgcolor(watching_long ? color.new(color.green, 90) : na, title="Watching Long")
@@ -706,11 +778,11 @@ bgcolor(just_closed and not is_winner ? color.new(color.maroon, 70) : na, title=
 
 // Watch labels
 if any_touch_dn and not watching_long[1] and is_flat_for_watch and in_session
-    t = (enable_es_iv and es_iv_touch_dn) ? "ESIV" + str.tostring(es_iv_sd_level_dn) + "L" : (enable_es_hv and es_hv_touch_dn) ? "ESHV" + str.tostring(es_hv_sd_level_dn) + "L" : (enable_spx_sx and spx_sx_touch_dn) ? "SPXSX" + str.tostring(spx_sx_sd_level_dn) + "L" : (enable_ndx_sx and ndx_sx_touch_dn) ? "NDXSX" + str.tostring(ndx_sx_sd_level_dn) + "L" : ""
+    t = (enable_es_iv and es_iv_touch_dn) ? "ESIV" + str.tostring(es_iv_sd_level_dn) + "L" : (enable_es_hv and es_hv_touch_dn) ? "ESHV" + str.tostring(es_hv_sd_level_dn) + "L" : (enable_spx_sx and spx_sx_touch_dn) ? "SPXSX" + str.tostring(spx_sx_sd_level_dn) + "L" : (enable_ndx_sx and ndx_sx_touch_dn) ? "NDXSX" + str.tostring(ndx_sx_sd_level_dn) + "L" : (enable_nq and nq_touch_dn) ? "NQ" + str.tostring(nq_sd_level_dn) + "L" : ""
     if t != ""
         label.new(bar_index, high + watch_label_offset, t, style=label.style_label_down, color=color.new(color.purple, 30), textcolor=color.white, size=size.small)
 
 if any_touch_up and not watching_short[1] and is_flat_for_watch and in_session
-    t = (enable_es_iv and es_iv_touch_up) ? "ESIV" + str.tostring(es_iv_sd_level_up) + "H" : (enable_es_hv and es_hv_touch_up) ? "ESHV" + str.tostring(es_hv_sd_level_up) + "H" : (enable_spx_sx and spx_sx_touch_up) ? "SPXSX" + str.tostring(spx_sx_sd_level_up) + "H" : (enable_ndx_sx and ndx_sx_touch_up) ? "NDXSX" + str.tostring(ndx_sx_sd_level_up) + "H" : ""
+    t = (enable_es_iv and es_iv_touch_up) ? "ESIV" + str.tostring(es_iv_sd_level_up) + "H" : (enable_es_hv and es_hv_touch_up) ? "ESHV" + str.tostring(es_hv_sd_level_up) + "H" : (enable_spx_sx and spx_sx_touch_up) ? "SPXSX" + str.tostring(spx_sx_sd_level_up) + "H" : (enable_ndx_sx and ndx_sx_touch_up) ? "NDXSX" + str.tostring(ndx_sx_sd_level_up) + "H" : (enable_nq and nq_touch_up) ? "NQ" + str.tostring(nq_sd_level_up) + "H" : ""
     if t != ""
         label.new(bar_index, low - watch_label_offset, t, style=label.style_label_up, color=color.new(color.purple, 30), textcolor=color.white, size=size.small)
