@@ -73,9 +73,12 @@ new_session := is_globex_open
 var float es_globex_open = na
 var float es_globex_prev_close = na
 
+// ES Daily - for accurate previous day close
+[es_today_open, es_yest_close] = request.security(syminfo.tickerid, "D", [open, close[1]], barmerge.gaps_off, barmerge.lookahead_on)
+
 if is_globex_open
     es_globex_open := open
-    es_globex_prev_close := close[1]
+    es_globex_prev_close := es_yest_close
 
 // =============================================================================
 // MULTI-TICKER DATA
