@@ -86,10 +86,13 @@ if is_globex_open
 [tqqq_high, tqqq_low, tqqq_close_val, tqqq_high_prev, tqqq_low_prev] = request.security("TQQQ", timeframe.period, [high, low, close, high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
 [soxl_today_open, soxl_yest_close] = request.security("SOXL", "D", [open, close[1]], barmerge.gaps_off, barmerge.lookahead_on)
 [soxl_high, soxl_low, soxl_close_val, soxl_high_prev, soxl_low_prev] = request.security("SOXL", timeframe.period, [high, low, close, high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
-// OVN tickers - intrabar only
+// OVN tickers - intrabar + daily for prev close
 [nq_high, nq_low, nq_close_val, nq_high_prev, nq_low_prev, nq_open_price] = request.security("NQ1!", timeframe.period, [high, low, close, high[1], low[1], open], barmerge.gaps_off, barmerge.lookahead_off)
 [spx_sx_high, spx_sx_low, spx_sx_close_val, spx_sx_high_prev, spx_sx_low_prev, spx_sx_open_price] = request.security("SPREADEX:SPX", timeframe.period, [high, low, close, high[1], low[1], open], barmerge.gaps_off, barmerge.lookahead_off)
 [ndx_sx_high, ndx_sx_low, ndx_sx_close_val, ndx_sx_high_prev, ndx_sx_low_prev, ndx_sx_open_price] = request.security("SPREADEX:NDX", timeframe.period, [high, low, close, high[1], low[1], open], barmerge.gaps_off, barmerge.lookahead_off)
+nq_yest_close = request.security("NQ1!", "D", close[1], barmerge.gaps_off, barmerge.lookahead_on)
+spx_sx_yest_close = request.security("SPREADEX:SPX", "D", close[1], barmerge.gaps_off, barmerge.lookahead_on)
+ndx_sx_yest_close = request.security("SPREADEX:NDX", "D", close[1], barmerge.gaps_off, barmerge.lookahead_on)
 
 // =============================================================================
 // CALCULATE SD LEVELS
@@ -107,11 +110,11 @@ if is_globex_open
     es_open := es_globex_open
     es_prev_close := es_globex_prev_close
     nq_open := nq_open_price
-    nq_prev_close := nq_close_val[1]
+    nq_prev_close := nq_yest_close
     spx_sx_open := spx_sx_open_price
-    spx_sx_prev_close := spx_sx_close_val[1]
+    spx_sx_prev_close := spx_sx_yest_close
     ndx_sx_open := ndx_sx_open_price
-    ndx_sx_prev_close := ndx_sx_close_val[1]
+    ndx_sx_prev_close := ndx_sx_yest_close
 if new_rth_session
     spx_open := spx_today_open, spx_prev_close := spx_yest_close
     spy_open := spy_today_open, spy_prev_close := spy_yest_close
